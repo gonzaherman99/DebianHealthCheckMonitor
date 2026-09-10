@@ -1,0 +1,60 @@
+HealthCheck.sh
+
+This is a lightweight, dependency free Bash script for auditing a single Linux
+host's health and firewall activity, with results pushed to Slack,
+Microsoft Teams, and/or email. Built for hosts (bastions, gateways,
+small-shop servers) where a full monitoring stack (Nagios, Zabbix,
+Prometheus) would be overkill.
+
+This is a work in progress.
+
+What it checks
+
+-Root partition disk usage           -> df -h
+-Reachability of a host list         -> ping -c 1
+-Firewall log activity (REJECT/DROP/ERROR) -> grep across /var/log/*
+-Active firewall ruleset             -> iptables -L, nft list ruleset,
+                                          firewall-cmd --list-all-zones
+-Open listening ports                -> ss -lntu
+-System resource stats               -> vmstat -w
+
+
+Notifications
+
+connector() is a routes to one or more of three
+channels based on a single argument:
+ 
+   1        -> Microsoft Teams
+   2        -> Slack
+   3        -> Email
+   12/13/23/123 -> any combination of the above
+ 
+-teamsConnector: intended to POST an Adaptive Card to a Teams
+  incoming webhook. NOT YET DONE
+-slackConnector: intended to POST to a Slack incoming webhook.
+-sendEmail: pipes a result file into sendmail.
+
+Usage
+
+./HealthCheck.sh <notify_option> <sender_email> <receiver_email>
+
+Example  notify via Slack and email:
+
+./HealthCheck.sh 23 healthcheck@example.com oncall@example.com
+
+Setup
+
+-Place an `ip.txt` file (one hostname/IP per line) in the directory
+  the script is run from.
+-The invoking user needs sudo to: mkdir, grep on
+  /var/log/*, iptables, nft, and firewall-cmd.
+-sendmail must be installed and configured on the host for email
+  notifications to work.
+-A Slack incoming webhook URL is required for Slack notifications.
+
+Security Notes
+
+-This script requires sudo for several operations
+-Any webhook URL or API secret ever committed to this script (or
+ pasted anywhere outside a secrets manager) should be treated as
+ compromised and rotated.
