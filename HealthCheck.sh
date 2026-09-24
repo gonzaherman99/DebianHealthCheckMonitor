@@ -1,5 +1,14 @@
 #! /bin/bash
 
+unset -v webhookurlteams webhookurlslack appid # make sure those variables are not exported
+
+CONFIG_FILE="$HOME/.config/healthcheck/config"
+if [[ -r "$CONFIG_FILE" ]]; then
+    source "$CONFIG_FILE"
+else
+    echo "Error: config file not found or unreadable: $CONFIG_FILE" >&2
+fi
+
 DIR="/tmp/HealthCheck"
 
 NOTIFYOPTION=$1
@@ -47,13 +56,14 @@ check_for_file() {
     local base="$1"
     local file1="${base}.txt"
     local file2="${base}2.txt"
+    local subject="$base"
 
     if [[ -e "$file1" && -e "$file2" ]]; then
         local diffOutput
         diffOutput=$(sudo diff "$file1" "$file2")
         if [[ -n "$diffOutput" ]]; then
             echo "$diffOutput" | sudo tee -a "$base"_diff_result.txt
-            connector "$NOTIFYOPTION" "Change detected in ${base}:"$'\n'"$diffOutput" "$SENDEREMAIL" "$RECEIVEREMAIL"
+            connector "$NOTIFYOPTION" "Change detected in ${base}:"$'\n'"$diffOutput" "$subject"
         fi
     elif [[ -e "$file1" && ! -e "$file2" ]]; then
         sudo touch "$file2"
@@ -61,6 +71,7 @@ check_for_file() {
         sudo touch "$file1"
     fi
 
+    # Each time this runs, it will move the info from file1 to file2, intead of checking for position and see what is the last run
      sudo mv "$file1" "$file2"
 }
 
@@ -101,24 +112,32 @@ connector() {
 
 teamsConnector() {
     MESSAGE=$2
-    WEBHOOKURL=#WEBHOOKURL
+    WEBHOOKURL="$webhookurlteams"
     ADAPTIVECARD=
 }
 
 slackConnector() {
-    APPID=
-    CLIENTID=
-    VERTIFICATIONTOKEN=
-    CLIENTSECRET=
-    SIGNINGSECRET=
+    APPID="$appid"
+    # CLIENTID=
+    # VERTIFICATIONTOKEN=
+    # CLIENTSECRET=
+    # SIGNINGSECRET=
     MESSAGE=$2
-    WEBHOOKURL=
+    WEBHOOKURL="$webhookurlslack"
 
-    curl -X POST -H 'Content-type: application/json' --data "{\"text\": \"$MESSAGE\"}" #webhookurl
+    payload=$(jq -n --arg text "$MESSAGE" '{text: $text}')
+
+    curl -X POST -H 'Content-type: application/json' --data "$payload" "$WEBHOOKURL"
 }
 
-sendEmail() {
-    sendmail < $2 -f  $3 $4
+sendEmail() { 
+    {
+        echo "From: "$SENDEREMAIL""
+        echo "To: "$RECEIVEREMAIL""
+        echo "Subject: $3"
+        echo
+        echo "$2"
+    } | /usr/lib/sendmail -t
 }
 
 main () {
@@ -140,8 +159,8 @@ main () {
     AVECOLUMN=${AVECOLUMN%\%} 
     
 
-    if [[ "$AVECOLUMN" -lt 90 ]]; then
-        connector 2 "Available space in disk is equal or less than 90%!" $SENDEREMAIL $RECEIVEREMAIL
+    if [[ "$AVECOLUMN" -gt 90 ]]; then
+        connector 2 "Available space in disk is less than 10%!" $SENDEREMAIL $RECEIVEREMAIL
     fi
 
 
@@ -159,7 +178,7 @@ main () {
         check_ping "${ARRAY[index]}" # > stdout.txt 2> stderr.txt
     done
 
-    # Patternsdrop
+    # Patterns Drop
 
     sudo truncate -s 0 "$DIR"/result_reject.txt
     for file in /var/log/*; do 
@@ -185,40 +204,41 @@ main () {
 
     # Rules for firewall IPTABLES and NFTTABLES
 
-    IPTABLES=$(check_for_error sudo iptables -L | sudo tee -a "$DIR"/iptables.txt)
+    IPTABLES=$(check_for_error sudo iptables -L)
+    echo "$IPTABLES" | sudo tee "$DIR"/iptables.txt > /dev/null
+    check_for_file "$DIR"/iptables
 
-    connector $1  "$(cat "$DIR"/iptables.txt)" $SENDEREMAIL $RECEIVEREMAIL
+    # NFT tables
 
-
-    NFTTABLES=$(check_for_error sudo nft list ruleset | sudo tee -a "$DIR"/nfttables.txt)
-
-    connector $1  "$(cat "$DIR"/nfttables.txt)" $SENDEREMAIL $RECEIVEREMAIL
+    NFTTABLES=$(check_for_error sudo nft list ruleset)
+    echo "$NFTTABLES" | sudo tee "$DIR"/nfttables.txt > /dev/null
+    check_for_file "$DIR"/nfttables
 
 
     #Getting Firewalld rules and regions
     
-    FIREWALLD=$(check_for_error sudo firewall-cmd --list-all-zones | sudo tee -a "$DIR"/FIREWALLD.txt)
-
-    connector $1 "$(cat "$DIR"/FIREWALLD.txt)" $SENDEREMAIL $RECEIVEREMAIL
+    FIREWALLD=$(check_for_error sudo firewall-cmd --list-all-zones)
+    echo "$FIREWALLD" | sudo tee "$DIR"/firewalld.txt > /dev/null
+    check_for_file "$DIR"/firewalld
 
 
    # ss -lntu Checking the ports of opening.
 
-   PORTSSS=$( check_for_error ss -lntu | sudo tee -a "$DIR"/ports.txt)
-
-   connector $1 "$(cat "$DIR"/ports.txt)" $SENDEREMAIL $RECEIVEREMAIL
+   PORTSSS=$(check_for_error ss -lntu)
+   echo "$PORTSSS" | sudo tee "$DIR"/ports.txt > /dev/null
+   check_for_file "$DIR"/ports
 
 
     # VM Statistics 
 
     VMSTATISTICS=$(check_for_error vmstat -w)
-    echo "$SSSUMMARY" | sudo tee "$DIR"/vmstatistics.new > /dev/null
+    echo "$VMSTATISTICS" | sudo tee "$DIR"/vmstatistics.txt > /dev/null
     check_for_file "$DIR"/vmstatistics
 
     # ss -s summary
 
     SSSUMMARY=$(check_for_error ss -s)
-    echo "$SSSUMMARY" | sudo tee "$DIR"/sssummary.new > /dev/null
+    echo "$SSSUMMARY" | sudo tee "$DIR"/sssummary.txt > /dev/null
     check_for_file "$DIR"/sssummary
 
     return 0;
