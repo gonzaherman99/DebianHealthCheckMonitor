@@ -6,7 +6,6 @@ Microsoft Teams, and/or email. Built for hosts (bastions, gateways,
 small-shop servers) where a full monitoring stack (Nagios, Zabbix,
 Prometheus) would be overkill.
 
-This is a work in progress.
 
 What it checks
 
